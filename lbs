@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+
+import sys
+from bs4 import BeautifulSoup
+import requests
+import json
+from wordfreq import zipf_frequency
+
+UNCOMMON_THRESHOLD = 5 # Min freq score needed for uncommon solutions
+RARE_THRESHOLD = 7 # Min freq score needed for rare solutions
+MAX_FREQ = zipf_frequency("the", 'en') # Freq of most common word ("the")
+USAGE = '''Usage: lbs [options...]
+ -a, --all      Print all found solutions
+ -n, --number   Print the number of found solutions
+ -w [FILE], --write [FILE]
+                Write today's date, letters, dictionary,
+                and all found solutions to FILE. If no
+                FILE is given, writes to <DATE>.txt
+ -s [STR], --search [STR]
+                Search for the string STR within the
+                found solutions and prints the number
+                of matches\n'''
+DASHES = "-------------------------------"
+
+# Flag parsing
+flags = [False, False, False, False, False] # [-a, -n, -w, -w FILE, -s]
+if (len(sys.argv) == 2):
+    if (sys.argv[1] in ["-a", "--all"]):
+        flags[0] = True
+    elif (sys.argv[1] in ["-n", "--number"]):
+        flags[1] = True
+    elif (sys.argv[1] in ["-w", "--write"]):
+        flags[2] = True
+
+elif (len(sys.argv) == 3):
+    if (sys.argv[1] in ["-w", "--write"]):
+        flags[2] = True
+        flags[3] = True
+    elif (sys.argv[1] in ["-s", "--search"]):
+        flags[4] = True
+
+if (True not in flags):
+    print(USAGE)
+    exit()
+
+# Loading letters and dictionary
+req = requests.get('https://www.nytimes.com/puzzles/letter-boxed').text
+soup = BeautifulSoup(req, 'html.parser')
+dict_str = soup.find('script', string=lambda s: s and "dictionary" in s).string
+json_data = json.loads(dict_str[dict_str.find('{'):]) # Remove characters before json
+dict_list = json_data["dictionary"]
+all_letters = "".join(json_data["sides"])
+
+# Populate arrays corresponding to starting and ending letters
+start = [[] for _ in range(26)]
+end = [[] for _ in range(26)]
+for word in dict_list:
+    start[ord(word[0]) - 65].append(word)
+    end[ord(word[-1]) - 65].append(word)
+
+# Loop through words with each ending/starting letter
+res = []
+for x in range(26):
+    for first in end[x]:
+        for second in start[x]:
+            if (set(first + second) == set(all_letters)):
+                freq1 = zipf_frequency(first, 'en')
+                freq2 = zipf_frequency(second, 'en')
+                freq_min = MAX_FREQ - max(freq1, freq2)
+                freq_max = MAX_FREQ - min(freq1, freq2)
+                pair = first + " - " + second
+                res.append((freq_max, freq_min, pair))
+
+# Partition found solutions by complexity
+res = sorted(res)
+common = []
+uncommon = []
+rare = []
+for pair in res:
+    if pair[0] < UNCOMMON_THRESHOLD:
+        common.append(pair)
+    elif pair[0] < RARE_THRESHOLD:
+        uncommon.append(pair)
+    else:
+        rare.append(pair)
+
+# -s, --search flag
+if flags[4]:
+    string = str(sys.argv[2]).upper()
+    num_total, num_common, num_uncommon, num_rare = 0, 0, 0, 0
+    for pair in common:
+        if (string in pair[2]):
+            num_common += 1
+    for pair in uncommon:
+        if (string in pair[2]):
+            num_uncommon += 1
+    for pair in rare:
+        if (string in pair[2]):
+            num_rare += 1
+    num_total = num_common + num_uncommon + num_rare
+    print("\nNumber of 2-word solutions containing \"" + string + "\": " + str(num_total))
+    print(DASHES + "\nCommon Solutions: " + str(num_common))
+    print(DASHES + "\nUncommon Solutions: " + str(num_uncommon))
+    print(DASHES + "\nRare Solutions: " + str(num_rare))
+    print(DASHES + "\n")
+    exit()
+
+# -w, --write flag
+if flags[2]:
+    date_str = str(json_data["printDate"])
+    file_str = date_str + ".txt"
+    if flags[3]:
+        file_str = str(sys.argv[2])
+    file = open(file_str, 'w')
+    sys.stdout = file
+    print("Date: " + date_str)
+    print("Letters: " + str(json_data["sides"]))
+    print("Dictionary: " + str(json_data["dictionary"]))
+
+# Remaining flags
+print("\nNumber of 2-word solutions: " + str(len(res)))
+print(DASHES)
+print("Common Solutions: " + str(len(common)))
+if not flags[1]:
+	for pair in common:
+		print(pair[2])
+print(DASHES)
+print("Uncommon Solutions: " + str(len(uncommon)))
+if not flags[1]:
+	for pair in uncommon:
+		print(pair[2])
+print(DASHES)
+print("Rare Solutions: " + str(len(rare)))
+if not flags[1]:
+	for pair in rare:
+		print(pair[2])
+print(DASHES + "\n")
+
